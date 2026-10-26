@@ -17,7 +17,7 @@ ISBNs are only validated for format because two of the three sample ISBNs have a
 
 New books go to the chosen shelf or, if none is given, to the first one with free space; the shelf view shows how many of the books on each shelf are currently lent.
 
-Next up are a role hierarchy with an `admin` role, shelf management, multiple copies per ISBN and real sign-in with accounts, sessions and HTTPS (see roadmap), followed by check-digit validation, member management with due dates, a database instead of the JSON file and further endpoints (single lookup, own loans).
+Next up are a role hierarchy with an `admin` role, shelf management, multiple copies per ISBN and real sign-in with accounts, sessions and HTTPS (see roadmap), followed by check-digit validation, member management with due dates, a database instead of the JSON file and further endpoints (single lookup, own loans). Known refactorings and smaller improvements (route registration, rollback, error format, shutdown, CI) are listed under "Refactoring and improvements".
 
 ## Deutsch
 
@@ -35,7 +35,7 @@ Die ISBN wird nur auf ihr Format geprüft, weil zwei der drei Beispiel-ISBNs ein
 
 Neue Bücher landen im gewählten Regal oder, ohne Angabe, im ersten mit freiem Platz; die Regalansicht zeigt neben der Belegung, wie viele der Bücher gerade ausgeliehen sind.
 
-Als Nächstes stehen eine Rollenhierarchie mit einer `admin`-Rolle, Regalverwaltung, mehrere Exemplare pro ISBN und eine echte Anmeldung mit Konten, Sessions und HTTPS an (siehe Roadmap), danach Prüfziffer-Validierung, Personenverwaltung mit Leihfristen, eine Datenbank statt der JSON-Datei und weitere Endpunkte (Einzelabruf, eigene Ausleihen).
+Als Nächstes stehen eine Rollenhierarchie mit einer `admin`-Rolle, Regalverwaltung, mehrere Exemplare pro ISBN und eine echte Anmeldung mit Konten, Sessions und HTTPS an (siehe Roadmap), danach Prüfziffer-Validierung, Personenverwaltung mit Leihfristen, eine Datenbank statt der JSON-Datei und weitere Endpunkte (Einzelabruf, eigene Ausleihen). Bekannte Refactorings und kleinere Verbesserungen (Routen-Registrierung, Rollback, Fehlerformat, Shutdown, CI) stehen unter „Refactoring and improvements“.
 
 ## Server
 
@@ -134,6 +134,37 @@ Today static bearer tokens from `tokens.json` are the only credentials: no accou
 - **Brute-force protection:** rate limiting and a temporary lockout after repeated failed logins, with the same error message for unknown users and wrong passwords.
 - **Transport:** HTTPS only (TLS directly in the server or via a reverse proxy) plus HSTS; without it, passwords and sessions travel in clear text.
 - **Later:** single sign-on (OIDC) for employees, password reset, and an audit log of who lent, returned or changed what.
+
+## Refactoring and improvements
+
+Known weak spots of the current code, independent of new features. Refactorings change structure, not behaviour, and are best done before the roadmap items above make the code bigger.
+
+### Refactoring
+
+| Where | Today | Better |
+|---|---|---|
+| `cmd/server/main.go` | API routes are registered twice: in `internal/api` and again as prefixes in `main` (`/books`, `/books/`, `/shelves`, `/me`); a new endpoint that is only added in `api` silently returns 404 | one mux owns all routes, e.g. the API under `/api/` or `api.NewHandler` mounting the frontend too |
+| `internal/library` | every write method carries its own rollback closure in case saving fails | with shelf management and copies this grows and is easy to get wrong; apply changes to a copy and swap it in after a successful save, or let a database transaction do it |
+| `internal/library` | `locate` scans all shelves and books on every add, lend and return; its `*Shelf` result is never used | an index `map[ISBN]` to the book's position, and drop the unused return value |
+| `internal/api/handler.go` | one file of about 300 lines holds DTOs, routes, middleware, handlers and error mapping | split into `books.go`, `loans.go`, `shelves.go`, `middleware.go` and `errors.go` before new endpoints arrive |
+| sample data and test fixtures | the sample data lives in `cmd/server/seed.go`; the library and API tests each build their own fixture; `cmd/server` has no tests | one shared sample-data package used by the server and the tests, plus a test for loading, seeding and saving on start |
+| `go.mod` | declares `go 1.27.1`, the toolchain of the development machine | the code needs Go 1.22 (method and path patterns in `ServeMux`, range over int); declaring that lets older toolchains build it, to be confirmed in CI |
+
+### Improvements
+
+| Area | Today | Better |
+|---|---|---|
+| Error format | unknown routes and wrong methods get the `ServeMux`'s plain-text 404 and 405; a body over 1 MB is reported as 400 "malformed JSON body" | JSON errors for every response, 413 for an oversized body |
+| Strict input | unknown JSON fields are ignored: `{"borower":"Max"}` (typo) fails with "borrower must not be empty" | `DisallowUnknownFields`, so the error names the actual mistake |
+| Error codes | the frontend shows the API's English error text inside a German page | a machine-readable `code` next to the message (`{"error":"…","code":"already_lent"}`) that the frontend translates |
+| Shutdown | the server stops immediately on Ctrl+C | `signal.NotifyContext` plus `srv.Shutdown`, so running requests finish |
+| Timeouts | only `ReadHeaderTimeout` is set | also `ReadTimeout`, `WriteTimeout` and `IdleTimeout` |
+| Logging | only errors are logged, as plain text | structured logs with `log/slog` and one log line per request (method, path, status, duration) |
+| Security headers | none are set for the frontend | `Content-Security-Policy`, `X-Content-Type-Options: nosniff` and `Referrer-Policy` |
+| Durability | the data file is synced before the rename, its directory is not | sync the directory after the rename, so the new file also survives a power cut |
+| Lock during disk I/O | saving, including the sync to disk, holds the write lock, so searches wait for the disk too | acceptable for one small instance; one more reason for the database step |
+| CI | tests run only locally, and `-race` could not run on the development machine | GitHub Actions with `gofmt`, `go vet` and `go test -race` (the runners have a C compiler) |
+| Frontend tests | only the delivery of the page is tested | an end-to-end test of login and the role-based buttons (e.g. Playwright), at the cost of a Node dependency in the test setup |
 
 ## Structure
 
