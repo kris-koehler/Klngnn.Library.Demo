@@ -19,7 +19,7 @@ import (
 
 func main() {
 	addr := flag.String("addr", ":8080", "listen address")
-	dataPath := flag.String("data", "buecherei.json", "path of the JSON data file")
+	dataPath := flag.String("data", "library-data.json", "path of the JSON data file")
 	tokensPath := flag.String("tokens", "tokens.json", "path of the JSON token file")
 	flag.Parse()
 

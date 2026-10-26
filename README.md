@@ -11,7 +11,7 @@ Reference-only is a property of a book instead of a subclass, errors are sentine
 
 The API separates self-service from administration by role rather than by separate servers: searching is public, customers use a bearer token to borrow only for themselves (the name comes from the token, not the request), and returning, adding books and viewing shelves are reserved for staff; tokens are configured statically in `tokens.json` and compared as SHA-256 hashes in constant time.
 
-After every change the state is written atomically to `buecherei.json` while the lock is still held (temp file + rename); if saving fails the change is rolled back, and if the file is missing on start, sample data is created.
+After every change the state is written atomically to `library-data.json` while the lock is still held (temp file + rename); if saving fails the change is rolled back, and if the file is missing on start, sample data is created.
 
 ISBNs are only validated for format because two of the three sample ISBNs have an invalid check digit; "Clean Code" is marked as reference-only for demonstration.
 
@@ -29,7 +29,7 @@ Präsenzbestand ist eine Eigenschaft des Buchs statt einer Unterklasse, Fehler s
 
 Die API trennt Self-Service und Verwaltung über Rollen statt über getrennte Server: Suchen ist öffentlich, Kundinnen und Kunden leihen per Bearer-Token nur für sich selbst aus (der Name kommt aus dem Token, nicht aus dem Request), Rückgabe, Anlegen von Büchern und Regalansicht sind dem Personal vorbehalten; die Tokens stehen statisch in `tokens.json` und werden als SHA-256-Hash in konstanter Zeit verglichen.
 
-Der Zustand wird nach jeder Änderung noch unter dem Lock atomar in `buecherei.json` geschrieben (Temp-Datei + Rename); schlägt das Speichern fehl, wird die Änderung zurückgerollt, und fehlt die Datei beim Start, werden Beispieldaten angelegt.
+Der Zustand wird nach jeder Änderung noch unter dem Lock atomar in `library-data.json` geschrieben (Temp-Datei + Rename); schlägt das Speichern fehl, wird die Änderung zurückgerollt, und fehlt die Datei beim Start, werden Beispieldaten angelegt.
 
 Die ISBN wird nur auf ihr Format geprüft, weil zwei der drei Beispiel-ISBNs eine ungültige Prüfziffer haben; „Clean Code“ ist zur Demonstration als Präsenzbestand markiert.
 
@@ -41,7 +41,7 @@ Als Nächstes stehen eine Rollenhierarchie mit einer `admin`-Rolle, Regalverwalt
 
 ```bash
 cp tokens.example.json tokens.json                 # demo tokens, see below
-go run ./cmd/server                                # :8080, data in ./buecherei.json
+go run ./cmd/server                                # :8080, data in ./library-data.json
 go run ./cmd/server -addr :9000 -data /tmp/b.json -tokens /etc/buecherei/tokens.json
 ```
 
