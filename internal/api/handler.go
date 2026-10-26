@@ -39,6 +39,7 @@ type bookRequest struct {
 	ISBN          string `json:"isbn"`
 	Year          int    `json:"year"`
 	ReferenceOnly bool   `json:"referenceOnly"`
+	Shelf         string `json:"shelf"` // optional; empty means first shelf with free space
 }
 
 type loanRequest struct {
@@ -163,7 +164,12 @@ func (h *handler) addBook(w http.ResponseWriter, r *http.Request, _ auth.Princip
 		return
 	}
 
-	shelfID, err := h.lib.AddBook(b)
+	shelfID := strings.TrimSpace(req.Shelf)
+	if shelfID == "" {
+		shelfID, err = h.lib.AddBook(b)
+	} else {
+		err = h.lib.AddBookToShelf(b, shelfID)
+	}
 	if err != nil {
 		writeError(w, err)
 		return
@@ -274,7 +280,8 @@ func statusFor(err error) int {
 	case errors.Is(err, errForbidden):
 		return http.StatusForbidden
 	case errors.Is(err, library.ErrInvalidISBN),
-		errors.Is(err, library.ErrInvalidInput):
+		errors.Is(err, library.ErrInvalidInput),
+		errors.Is(err, library.ErrShelfNotFound):
 		return http.StatusBadRequest
 	case errors.Is(err, library.ErrBookNotFound):
 		return http.StatusNotFound
@@ -282,7 +289,8 @@ func statusFor(err error) int {
 		errors.Is(err, library.ErrNotLent),
 		errors.Is(err, library.ErrReferenceOnly),
 		errors.Is(err, library.ErrDuplicateISBN),
-		errors.Is(err, library.ErrNoSpace):
+		errors.Is(err, library.ErrNoSpace),
+		errors.Is(err, library.ErrShelfFull):
 		return http.StatusConflict
 	default:
 		return http.StatusInternalServerError

@@ -91,6 +91,9 @@ func TestPersistFailureRollsBack(t *testing.T) {
 	if _, err := lib.AddBook(mustBook(t, "Vierter", "Autor", "9780000000004", 2000)); !errors.Is(err, errDisk) {
 		t.Errorf("AddBook() error = %v, want %v", err, errDisk)
 	}
+	if err := lib.AddBookToShelf(mustBook(t, "Vierter", "Autor", "9780000000004", 2000), "B"); !errors.Is(err, errDisk) {
+		t.Errorf("AddBookToShelf() error = %v, want %v", err, errDisk)
+	}
 	if err := lib.AddShelf("C", 1); !errors.Is(err, errDisk) {
 		t.Errorf("AddShelf() error = %v, want %v", err, errDisk)
 	}

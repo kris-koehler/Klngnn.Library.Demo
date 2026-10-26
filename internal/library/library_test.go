@@ -74,6 +74,40 @@ func TestAddBookDuplicateISBN(t *testing.T) {
 	}
 }
 
+func TestAddBookToShelf(t *testing.T) {
+	lib := newTestLibrary(t)
+
+	if err := lib.AddBookToShelf(mustBook(t, "Vierter", "Autor", "9780000000004", 2000), "B"); err != nil {
+		t.Fatalf("AddBookToShelf() error = %v", err)
+	}
+	if got := lib.Search("Vierter"); len(got) != 1 || got[0].ShelfID != "B" {
+		t.Errorf("Search() = %+v, want book on shelf B", got)
+	}
+}
+
+func TestAddBookToShelfErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		isbn    ISBN
+		shelfID string
+		wantErr error
+	}{
+		{"full shelf", "9780000000004", "A", ErrShelfFull},
+		{"unknown shelf", "9780000000004", "Z", ErrShelfNotFound},
+		{"duplicate isbn", isbnHobbit, "B", ErrDuplicateISBN},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lib := newTestLibrary(t)
+
+			err := lib.AddBookToShelf(mustBook(t, "Neu", "Autor", tt.isbn, 2000), tt.shelfID)
+			if !errors.Is(err, tt.wantErr) {
+				t.Errorf("AddBookToShelf() error = %v, want %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestAddShelfInvalid(t *testing.T) {
 	lib := newTestLibrary(t)
 

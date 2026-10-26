@@ -6,6 +6,7 @@ var (
 	ErrInvalidISBN   = errors.New("invalid isbn")
 	ErrInvalidInput  = errors.New("invalid input")
 	ErrShelfFull     = errors.New("shelf is full")
+	ErrShelfNotFound = errors.New("shelf not found")
 	ErrNoSpace       = errors.New("no shelf has free space")
 	ErrDuplicateISBN = errors.New("book with this isbn already exists")
 	ErrBookNotFound  = errors.New("book not found")

@@ -64,16 +64,38 @@ func (l *Library) AddBook(b Book) (shelfID string, err error) {
 	}
 	for _, s := range l.shelves {
 		if s.HasSpace() {
-			if err := s.Add(b); err != nil {
-				return "", err
-			}
-			if err := l.save(func() { s.books = s.books[:len(s.books)-1] }); err != nil {
+			if err := l.place(b, s); err != nil {
 				return "", err
 			}
 			return s.ID(), nil
 		}
 	}
 	return "", ErrNoSpace
+}
+
+// AddBookToShelf places the book on the shelf with the given ID.
+func (l *Library) AddBookToShelf(b Book, shelfID string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if _, _, ok := l.locate(b.ISBN); ok {
+		return fmt.Errorf("%w: %s", ErrDuplicateISBN, b.ISBN)
+	}
+	for _, s := range l.shelves {
+		if s.ID() == shelfID {
+			return l.place(b, s)
+		}
+	}
+	return fmt.Errorf("%w: %q", ErrShelfNotFound, shelfID)
+}
+
+// place adds the book to the shelf and persists the change. It expects l.mu
+// to be held.
+func (l *Library) place(b Book, s *Shelf) error {
+	if err := s.Add(b); err != nil {
+		return err
+	}
+	return l.save(func() { s.books = s.books[:len(s.books)-1] })
 }
 
 // Search returns all books whose title or author contains the query

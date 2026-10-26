@@ -253,6 +253,41 @@ func TestAddBook(t *testing.T) {
 	}
 }
 
+func TestAddBookToShelf(t *testing.T) {
+	tests := []struct {
+		name      string
+		shelf     string
+		want      int
+		wantShelf string
+	}{
+		{"chosen shelf", "B", http.StatusCreated, "B"},
+		{"blank means automatic", " ", http.StatusCreated, "B"},
+		{"full shelf", "A", http.StatusConflict, ""},
+		{"unknown shelf", "Z", http.StatusBadRequest, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newTestHandler(t)
+			body := `{"title":"Momo","author":"Michael Ende","isbn":"9783522202101","year":1973,"shelf":"` + tt.shelf + `"}`
+
+			rec := do(t, h, http.MethodPost, "/books", tokenStaff, body)
+			if rec.Code != tt.want {
+				t.Fatalf("status = %d, want %d (body %s)", rec.Code, tt.want, rec.Body)
+			}
+			if tt.wantShelf == "" {
+				return
+			}
+			var b bookResponse
+			if err := json.NewDecoder(rec.Body).Decode(&b); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if b.Shelf != tt.wantShelf {
+				t.Errorf("shelf = %q, want %q", b.Shelf, tt.wantShelf)
+			}
+		})
+	}
+}
+
 func TestAddBookErrors(t *testing.T) {
 	tests := []struct {
 		name string
