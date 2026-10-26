@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bücherei</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --surface: #fff; --text: #1d1d1b; --muted: #6b6b66;
+    --border: #e2e2dd; --accent: #2f5d8a; --ok: #2e7d4f; --warn: #a15c00; --error: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161615; --surface: #1f1f1d; --text: #ececea; --muted: #9a9a94;
+      --border: #33332f; --accent: #7fb0e0; --ok: #6cc28f; --warn: #e0a54d; --error: #f08a80;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, sans-serif; }
+  main { max-width: 960px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { margin: 0 0 16px; font-size: 1.6rem; }
+  h2 { margin: 0 0 12px; font-size: 1.1rem; }
+  section { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+  input, button { font: inherit; color: inherit; }
+  input { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; min-width: 0; }
+  input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button { background: var(--accent); color: var(--surface); border: 0; border-radius: 6px; padding: 6px 12px; cursor: pointer; white-space: nowrap; }
+  button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+  #search { width: 100%; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  th { color: var(--muted); font-weight: 600; font-size: .85rem; }
+  td.isbn { font-variant-numeric: tabular-nums; color: var(--muted); }
+  .status-ok { color: var(--ok); } .status-lent { color: var(--warn); } .status-ref { color: var(--muted); }
+  .lend { display: flex; gap: 6px; }
+  .lend input { width: 9rem; }
+  .empty { color: var(--muted); padding: 12px 0; }
+  form.add { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; align-items: center; }
+  form.add label.check { display: flex; gap: 6px; align-items: center; }
+  #message { min-height: 1.5em; margin: 0 0 12px; }
+  #message.error { color: var(--error); } #message.ok { color: var(--ok); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Bücherei</h1>
+  <p id="message" role="status"></p>
+
+  <section>
+    <h2>Suche</h2>
+    <input id="search" type="search" placeholder="Titel, Autor oder ISBN" aria-label="Suche">
+  </section>
+
+  <section>
+    <h2>Bestand</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Titel</th><th>Autor</th><th>ISBN</th><th>Jahr</th><th>Regal</th><th>Status</th><th></th></tr></thead>
+        <tbody id="books"></tbody>
+      </table>
+    </div>
+    <p id="empty" class="empty" hidden>Keine Bücher gefunden.</p>
+  </section>
+
+  <section>
+    <h2>Buch hinzufügen</h2>
+    <form class="add" id="add-form">
+      <input name="title" placeholder="Titel" required aria-label="Titel">
+      <input name="author" placeholder="Autor" required aria-label="Autor">
+      <input name="isbn" placeholder="ISBN (13 Ziffern)" required aria-label="ISBN">
+      <input name="year" type="number" min="1" placeholder="Jahr" required aria-label="Jahr">
+      <label class="check"><input name="referenceOnly" type="checkbox"> Präsenzbestand</label>
+      <button type="submit">Hinzufügen</button>
+    </form>
+  </section>
+</main>
+
+<script>
+const $ = (sel) => document.querySelector(sel);
+
+function showMessage(text, kind) {
+  const el = $("#message");
+  el.textContent = text;
+  el.className = kind || "";
+}
+
+async function api(method, path, body) {
+  const res = await fetch(path, {
+    method,
+    headers: body ? { "Content-Type": "application/json" } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (res.status === 204) return null;
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new Error((data && data.error) || `HTTP ${res.status}`);
+  return data;
+}
+
+function cell(text, className) {
+  const td = document.createElement("td");
+  td.textContent = text;
+  if (className) td.className = className;
+  return td;
+}
+
+function button(label, onClick, secondary) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.textContent = label;
+  if (secondary) b.className = "secondary";
+  b.addEventListener("click", onClick);
+  return b;
+}
+
+function actionCell(book) {
+  const td = document.createElement("td");
+  if (book.referenceOnly) return td;
+  if (book.lent) {
+    td.append(button("Zurückgeben", () => run(
+      () => api("DELETE", `/books/${book.isbn}/loan`),
+      `„${book.title}“ zurückgegeben.`), true));
+    return td;
+  }
+  const wrap = document.createElement("div");
+  wrap.className = "lend";
+  const name = document.createElement("input");
+  name.placeholder = "Name";
+  name.setAttribute("aria-label", `Name für „${book.title}“`);
+  const lend = () => run(
+    () => api("POST", `/books/${book.isbn}/loan`, { borrower: name.value }),
+    `„${book.title}“ ausgeliehen.`);
+  name.addEventListener("keydown", (e) => { if (e.key === "Enter") lend(); });
+  wrap.append(name, button("Ausleihen", lend));
+  td.append(wrap);
+  return td;
+}
+
+function statusCell(book) {
+  if (book.referenceOnly) return cell("Präsenzbestand", "status-ref");
+  return book.lent ? cell("ausgeliehen", "status-lent") : cell("verfügbar", "status-ok");
+}
+
+async function load() {
+  const q = $("#search").value;
+  try {
+    const books = await api("GET", `/books?q=${encodeURIComponent(q)}`);
+    const rows = books.map((b) => {
+      const tr = document.createElement("tr");
+      tr.append(cell(b.title), cell(b.author), cell(b.isbn, "isbn"), cell(b.year),
+        cell(b.shelf), statusCell(b), actionCell(b));
+      return tr;
+    });
+    $("#books").replaceChildren(...rows);
+    $("#empty").hidden = books.length > 0;
+  } catch (err) {
+    showMessage(err.message, "error");
+  }
+}
+
+async function run(action, successText) {
+  try {
+    await action();
+    showMessage(successText, "ok");
+  } catch (err) {
+    showMessage(err.message, "error");
+  }
+  await load();
+}
+
+let timer;
+$("#search").addEventListener("input", () => {
+  clearTimeout(timer);
+  timer = setTimeout(load, 200);
+});
+
+$("#add-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const form = e.target;
+  const f = new FormData(form);
+  run(async () => {
+    const book = await api("POST", "/books", {
+      title: f.get("title"),
+      author: f.get("author"),
+      isbn: f.get("isbn"),
+      year: Number(f.get("year")),
+      referenceOnly: f.get("referenceOnly") === "on",
+    });
+    form.reset();
+    return book;
+  }, `„${f.get("title")}“ hinzugefügt.`);
+});
+
+load();
+</script>
+</body>
+</html>

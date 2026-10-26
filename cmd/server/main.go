@@ -13,6 +13,7 @@ import (
 	"buecherei/internal/api"
 	"buecherei/internal/library"
 	"buecherei/internal/storage"
+	"buecherei/internal/web"
 )
 
 func main() {
@@ -25,9 +26,15 @@ func main() {
 		log.Fatalf("load %s: %v", *dataPath, err)
 	}
 
+	apiHandler := api.NewHandler(lib)
+	mux := http.NewServeMux()
+	mux.Handle("/books", apiHandler)
+	mux.Handle("/books/", apiHandler)
+	mux.Handle("GET /{$}", web.Handler())
+
 	srv := &http.Server{
 		Addr:              *addr,
-		Handler:           api.NewHandler(lib),
+		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	log.Printf("listening on %s, data in %s", srv.Addr, *dataPath)
