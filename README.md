@@ -3,6 +3,7 @@
 ## English
 
 A dependency-free Go backend that manages a library with capacity-limited shelves and offers searching, lending, returning and adding books as well as shelf occupancy via a JSON HTTP API and a minimal browser frontend; run it with `cp tokens.example.json tokens.json && go run ./cmd/server`, open http://localhost:8080 and test it with `go test ./...` (or `go test -race ./...` where cgo and a C compiler are available – they were not on the development machine, so the concurrency test was run with `-count=200` instead).
+
 The domain (`internal/library`) knows nothing about HTTP or files, loan state is kept centrally in the library rather than in the book, and lent books keep their shelf slot so a return can never fail because a shelf is full.
 Reference-only is a property of a book instead of a subclass, errors are sentinel errors that the API maps to 400/401/403/404/409, and a mutex keeps lending atomic under concurrent requests.
 The API separates self-service from administration by role rather than by separate servers: searching is public, customers use a bearer token to borrow only for themselves (the name comes from the token, not the request), and returning, adding books and viewing shelves are reserved for staff; tokens are configured statically in `tokens.json` and compared as SHA-256 hashes in constant time.
@@ -14,12 +15,19 @@ Next up are shelf management and multiple copies per ISBN (see roadmap), followe
 ## Deutsch
 
 Umgesetzt ist ein Go-Backend ohne externe Abhängigkeiten, das eine Bücherei mit Regalen begrenzter Kapazität verwaltet und Suchen, Ausleihen, Zurückgeben und Anlegen von Büchern sowie die Regalbelegung über eine JSON-HTTP-API und ein schmales Browser-Frontend anbietet; Start mit `cp tokens.example.json tokens.json && go run ./cmd/server`, danach http://localhost:8080 öffnen, Tests mit `go test ./...` (bzw. `go test -race ./...`, sofern cgo und ein C-Compiler verfügbar sind – auf der Entwicklungsmaschine war das nicht der Fall, der Nebenläufigkeitstest lief stattdessen mit `-count=200`).
+
 Die Domäne (`internal/library`) kennt weder HTTP noch Dateien, den Ausleihstatus verwaltet zentral die Bücherei statt das Buch, und ausgeliehene Bücher behalten ihren Regalplatz, damit eine Rückgabe nie an einem vollen Regal scheitert.
+
 Präsenzbestand ist eine Eigenschaft des Buchs statt einer Unterklasse, Fehler sind Sentinel-Errors, die die API auf 400/401/403/404/409 abbildet, und ein Mutex macht das Ausleihen bei parallelen Requests atomar.
+
 Die API trennt Self-Service und Verwaltung über Rollen statt über getrennte Server: Suchen ist öffentlich, Kundinnen und Kunden leihen per Bearer-Token nur für sich selbst aus (der Name kommt aus dem Token, nicht aus dem Request), Rückgabe, Anlegen von Büchern und Regalansicht sind dem Personal vorbehalten; die Tokens stehen statisch in `tokens.json` und werden als SHA-256-Hash in konstanter Zeit verglichen.
+
 Der Zustand wird nach jeder Änderung noch unter dem Lock atomar in `buecherei.json` geschrieben (Temp-Datei + Rename); schlägt das Speichern fehl, wird die Änderung zurückgerollt, und fehlt die Datei beim Start, werden Beispieldaten angelegt.
+
 Die ISBN wird nur auf ihr Format geprüft, weil zwei der drei Beispiel-ISBNs eine ungültige Prüfziffer haben; „Clean Code“ ist zur Demonstration als Präsenzbestand markiert.
+
 Neue Bücher landen im gewählten Regal oder, ohne Angabe, im ersten mit freiem Platz; die Regalansicht zeigt neben der Belegung, wie viele der Bücher gerade ausgeliehen sind.
+
 Als Nächstes stehen Regalverwaltung und mehrere Exemplare pro ISBN an (siehe Roadmap), danach Prüfziffer-Validierung, Personenverwaltung mit Leihfristen und echter Anmeldung (Passwörter oder SSO, Sessions statt statischer Tokens), HTTPS, eine Datenbank statt der JSON-Datei und weitere Endpunkte (Einzelabruf, eigene Ausleihen).
 
 ## Server
