@@ -1,15 +1,22 @@
-# Bücherei
+# Library (Demo)
+#### do not even tink about, to use in production yet!
 
 ## English
 
 A dependency-free Go backend that manages a library with capacity-limited shelves and offers searching, lending, returning and adding books as well as shelf occupancy via a JSON HTTP API and a minimal browser frontend; run it with `cp tokens.example.json tokens.json && go run ./cmd/server`, open http://localhost:8080 and test it with `go test ./...` (or `go test -race ./...` where cgo and a C compiler are available – they were not on the development machine, so the concurrency test was run with `-count=200` instead).
 
 The domain (`internal/library`) knows nothing about HTTP or files, loan state is kept centrally in the library rather than in the book, and lent books keep their shelf slot so a return can never fail because a shelf is full.
+
 Reference-only is a property of a book instead of a subclass, errors are sentinel errors that the API maps to 400/401/403/404/409, and a mutex keeps lending atomic under concurrent requests.
+
 The API separates self-service from administration by role rather than by separate servers: searching is public, customers use a bearer token to borrow only for themselves (the name comes from the token, not the request), and returning, adding books and viewing shelves are reserved for staff; tokens are configured statically in `tokens.json` and compared as SHA-256 hashes in constant time.
+
 After every change the state is written atomically to `buecherei.json` while the lock is still held (temp file + rename); if saving fails the change is rolled back, and if the file is missing on start, sample data is created.
+
 ISBNs are only validated for format because two of the three sample ISBNs have an invalid check digit; "Clean Code" is marked as reference-only for demonstration.
+
 New books go to the chosen shelf or, if none is given, to the first one with free space; the shelf view shows how many of the books on each shelf are currently lent.
+
 Next up are shelf management and multiple copies per ISBN (see roadmap), followed by check-digit validation, member management with due dates and real sign-in (passwords or SSO, sessions instead of static tokens), HTTPS, a database instead of the JSON file and further endpoints (single lookup, own loans).
 
 ## Deutsch
