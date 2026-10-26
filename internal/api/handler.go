@@ -54,6 +54,7 @@ type shelfResponse struct {
 	ID       string `json:"id"`
 	Capacity int    `json:"capacity"`
 	Used     int    `json:"used"`
+	Lent     int    `json:"lent"`
 	Free     int    `json:"free"`
 }
 
@@ -125,7 +126,7 @@ func (h *handler) listShelves(w http.ResponseWriter, r *http.Request, _ auth.Pri
 
 	shelves := make([]shelfResponse, 0, len(infos))
 	for _, s := range infos {
-		shelves = append(shelves, shelfResponse{ID: s.ID, Capacity: s.Capacity, Used: s.Used, Free: s.Capacity - s.Used})
+		shelves = append(shelves, shelfResponse{ID: s.ID, Capacity: s.Capacity, Used: s.Used, Lent: s.Lent, Free: s.Capacity - s.Used})
 	}
 	writeJSON(w, http.StatusOK, shelves)
 }

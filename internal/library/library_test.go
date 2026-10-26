@@ -237,7 +237,7 @@ func TestShelves(t *testing.T) {
 		t.Fatalf("Lend() error = %v", err)
 	}
 
-	want := []ShelfInfo{{ID: "A", Capacity: 2, Used: 2}, {ID: "B", Capacity: 2, Used: 1}}
+	want := []ShelfInfo{{ID: "A", Capacity: 2, Used: 2, Lent: 1}, {ID: "B", Capacity: 2, Used: 1, Lent: 0}}
 	if got := lib.Shelves(); !reflect.DeepEqual(got, want) {
 		t.Errorf("Shelves() = %+v, want %+v", got, want)
 	}

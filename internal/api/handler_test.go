@@ -291,6 +291,9 @@ func TestAddBookNoSpace(t *testing.T) {
 
 func TestListShelves(t *testing.T) {
 	h := newTestHandler(t)
+	if rec := do(t, h, http.MethodPost, "/books/"+isbnHobbit+"/loan", tokenMax, ""); rec.Code != http.StatusCreated {
+		t.Fatalf("lend: status = %d", rec.Code)
+	}
 
 	rec := do(t, h, http.MethodGet, "/shelves", tokenStaff, "")
 	if rec.Code != http.StatusOK {
@@ -300,7 +303,7 @@ func TestListShelves(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&shelves); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	want := []shelfResponse{{ID: "A", Capacity: 2, Used: 2, Free: 0}, {ID: "B", Capacity: 2, Used: 0, Free: 2}}
+	want := []shelfResponse{{ID: "A", Capacity: 2, Used: 2, Lent: 1, Free: 0}, {ID: "B", Capacity: 2, Used: 0, Lent: 0, Free: 2}}
 	if len(shelves) != len(want) || shelves[0] != want[0] || shelves[1] != want[1] {
 		t.Errorf("shelves = %+v, want %+v", shelves, want)
 	}

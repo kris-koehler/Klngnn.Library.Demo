@@ -46,7 +46,8 @@
   form.add label.check { display: flex; gap: 6px; align-items: center; }
   .shelves { display: flex; flex-wrap: wrap; gap: 12px; }
   .shelf { border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; min-width: 120px; }
-  .shelf strong { display: block; }
+  .shelf strong, .shelf small { display: block; }
+  .shelf small { color: var(--muted); font-size: .85rem; }
   .bar { height: 6px; background: var(--border); border-radius: 3px; margin-top: 6px; overflow: hidden; }
   .bar span { display: block; height: 100%; background: var(--accent); }
   #message { min-height: 1.5em; margin: 0 0 12px; }
@@ -220,12 +221,14 @@ async function loadShelves() {
     title.textContent = `Regal ${s.id}`;
     const text = document.createElement("span");
     text.textContent = `${s.used} von ${s.capacity} belegt`;
+    const lent = document.createElement("small");
+    lent.textContent = `davon ${s.lent} ausgeliehen`;
     const bar = document.createElement("div");
     bar.className = "bar";
     const fill = document.createElement("span");
     fill.style.width = `${(s.used / s.capacity) * 100}%`;
     bar.append(fill);
-    div.append(title, text, bar);
+    div.append(title, text, lent, bar);
     return div;
   }));
 }

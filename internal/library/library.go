@@ -101,11 +101,12 @@ func (l *Library) Search(query string) []SearchResult {
 }
 
 // ShelfInfo describes the occupancy of a shelf. Lent books count as used
-// because their slot stays reserved.
+// because their slot stays reserved; Lent tells how many of them are out.
 type ShelfInfo struct {
 	ID       string
 	Capacity int
 	Used     int
+	Lent     int
 }
 
 // Shelves returns the occupancy of all shelves in the order they were added.
@@ -116,7 +117,13 @@ func (l *Library) Shelves() []ShelfInfo {
 
 	infos := make([]ShelfInfo, 0, len(l.shelves))
 	for _, s := range l.shelves {
-		infos = append(infos, ShelfInfo{ID: s.id, Capacity: s.capacity, Used: len(s.books)})
+		info := ShelfInfo{ID: s.id, Capacity: s.capacity, Used: len(s.books)}
+		for _, b := range s.books {
+			if _, lent := l.loans[b.ISBN]; lent {
+				info.Lent++
+			}
+		}
+		infos = append(infos, info)
 	}
 	return infos
 }

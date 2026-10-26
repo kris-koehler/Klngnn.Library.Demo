@@ -49,7 +49,7 @@ Authenticated requests send `Authorization: Bearer <token>`.
 | POST | `/books/{isbn}/loan` | customer, staff | staff: `{"borrower":"…"}`; customer: optional, own name only | 201, loan |
 | DELETE | `/books/{isbn}/loan` | staff | – | 204 |
 | POST | `/books` | staff | `{"title":"…","author":"…","isbn":"…","year":2000,"referenceOnly":false}` | 201, book incl. shelf |
-| GET | `/shelves` | staff | – | 200, `[{"id":"A","capacity":2,"used":2,"free":0}]` (lent books count as used) |
+| GET | `/shelves` | staff | – | 200, `[{"id":"A","capacity":2,"used":2,"lent":1,"free":0}]` (lent books keep their slot, so they count as used) |
 
 Errors are returned as `{"error":"…"}` with status 400 (invalid input), 401 (missing or unknown token), 403 (role not allowed, or a customer borrowing for someone else), 404 (unknown book), 409 (conflict, e.g. already lent, reference-only, duplicate ISBN or no free shelf space) or 500 (e.g. data file not writable).
 
