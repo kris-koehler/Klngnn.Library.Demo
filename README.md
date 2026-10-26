@@ -8,7 +8,8 @@ Präsenzbestand ist eine Eigenschaft des Buchs statt einer Unterklasse, Fehler s
 Die API trennt Self-Service und Verwaltung über Rollen statt über getrennte Server: Suchen ist öffentlich, Kundinnen und Kunden leihen per Bearer-Token nur für sich selbst aus (der Name kommt aus dem Token, nicht aus dem Request), Rückgabe, Anlegen von Büchern und Regalansicht sind dem Personal vorbehalten; die Tokens stehen statisch in `tokens.json` und werden als SHA-256-Hash in konstanter Zeit verglichen.
 Der Zustand wird nach jeder Änderung noch unter dem Lock atomar in `buecherei.json` geschrieben (Temp-Datei + Rename); schlägt das Speichern fehl, wird die Änderung zurückgerollt, und fehlt die Datei beim Start, werden Beispieldaten angelegt.
 Die ISBN wird nur auf ihr Format geprüft, weil zwei der drei Beispiel-ISBNs eine ungültige Prüfziffer haben; „Clean Code“ ist zur Demonstration als Präsenzbestand markiert.
-Als Nächstes: Prüfziffer-Validierung, mehrere Exemplare pro ISBN, Personenverwaltung mit Leihfristen und echter Anmeldung (Passwörter oder SSO, Sessions statt statischer Tokens), HTTPS, eine Datenbank statt der JSON-Datei und weitere Endpunkte (Einzelabruf, eigene Ausleihen, Regale anlegen).
+Neue Bücher landen im gewählten Regal oder, ohne Angabe, im ersten mit freiem Platz; die Regalansicht zeigt neben der Belegung, wie viele der Bücher gerade ausgeliehen sind.
+Als Nächstes stehen Regalverwaltung und mehrere Exemplare pro ISBN an (siehe Roadmap), danach Prüfziffer-Validierung, Personenverwaltung mit Leihfristen und echter Anmeldung (Passwörter oder SSO, Sessions statt statischer Tokens), HTTPS, eine Datenbank statt der JSON-Datei und weitere Endpunkte (Einzelabruf, eigene Ausleihen).
 
 ## English
 
@@ -18,7 +19,8 @@ Reference-only is a property of a book instead of a subclass, errors are sentine
 The API separates self-service from administration by role rather than by separate servers: searching is public, customers use a bearer token to borrow only for themselves (the name comes from the token, not the request), and returning, adding books and viewing shelves are reserved for staff; tokens are configured statically in `tokens.json` and compared as SHA-256 hashes in constant time.
 After every change the state is written atomically to `buecherei.json` while the lock is still held (temp file + rename); if saving fails the change is rolled back, and if the file is missing on start, sample data is created.
 ISBNs are only validated for format because two of the three sample ISBNs have an invalid check digit; "Clean Code" is marked as reference-only for demonstration.
-Next steps: check-digit validation, multiple copies per ISBN, member management with due dates and real sign-in (passwords or SSO, sessions instead of static tokens), HTTPS, a database instead of the JSON file and further endpoints (single lookup, own loans, add shelves).
+New books go to the chosen shelf or, if none is given, to the first one with free space; the shelf view shows how many of the books on each shelf are currently lent.
+Next up are shelf management and multiple copies per ISBN (see roadmap), followed by check-digit validation, member management with due dates and real sign-in (passwords or SSO, sessions instead of static tokens), HTTPS, a database instead of the JSON file and further endpoints (single lookup, own loans).
 
 ## Server
 
@@ -48,10 +50,10 @@ Authenticated requests send `Authorization: Bearer <token>`.
 | GET | `/me` | customer, staff | – | 200, `{"name":"…","role":"…"}` |
 | POST | `/books/{isbn}/loan` | customer, staff | staff: `{"borrower":"…"}`; customer: optional, own name only | 201, loan |
 | DELETE | `/books/{isbn}/loan` | staff | – | 204 |
-| POST | `/books` | staff | `{"title":"…","author":"…","isbn":"…","year":2000,"referenceOnly":false}` | 201, book incl. shelf |
+| POST | `/books` | staff | `{"title":"…","author":"…","isbn":"…","year":2000,"referenceOnly":false,"shelf":"B"}` (`shelf` optional) | 201, book incl. shelf |
 | GET | `/shelves` | staff | – | 200, `[{"id":"A","capacity":2,"used":2,"lent":1,"free":0}]` (lent books keep their slot, so they count as used) |
 
-Errors are returned as `{"error":"…"}` with status 400 (invalid input), 401 (missing or unknown token), 403 (role not allowed, or a customer borrowing for someone else), 404 (unknown book), 409 (conflict, e.g. already lent, reference-only, duplicate ISBN or no free shelf space) or 500 (e.g. data file not writable).
+Errors are returned as `{"error":"…"}` with status 400 (invalid input or unknown shelf), 401 (missing or unknown token), 403 (role not allowed, or a customer borrowing for someone else), 404 (unknown book), 409 (conflict, e.g. already lent, reference-only, duplicate ISBN, chosen shelf full or no free shelf space) or 500 (e.g. data file not writable).
 
 ```bash
 KUNDE='Authorization: Bearer demo-kunde-max-7f3a9c'
@@ -65,6 +67,35 @@ curl -si -X POST -H "$PERSONAL" -H 'Content-Type: application/json' \
   -d '{"title":"Momo","author":"Michael Ende","isbn":"978-3-522-20210-1","year":1973}' \
   localhost:8080/books
 ```
+
+## Roadmap
+
+### Shelf management (staff)
+
+Today shelves can only be created in code (`cmd/server/seed.go`).
+
+| Operation | Rule |
+|---|---|
+| Add shelf (`POST /shelves`) | unique ID, capacity > 0 |
+| Resize shelf | growing is always allowed; shrinking only down to the number of books on it, lent books included (their slot is reserved), otherwise 409 |
+| Remove shelf | see below |
+| Move a book to another shelf | target needs free space; also works for lent books, whose reserved slot moves along |
+
+Open question: **what happens to the books when a shelf is removed?**
+
+1. *Only empty shelves can be removed* (409 otherwise). Simplest and explicit; staff moves the books first.
+2. *Remove and redistribute*: books move to other shelves with free space, all or nothing (409 if the remaining space is not enough). Lent books move too, so their return keeps working.
+
+Proposal: start with option 1 plus the "move book" operation, so that staff decides where books go; option 2 can follow as a convenience on top.
+
+### Multiple copies per ISBN
+
+Today one ISBN is exactly one physical book.
+
+- Split the *title* (ISBN, title, author, year) from the *copy* (own copy ID, shelf, reference-only, loan state). Reference-only becomes a property of the copy, e.g. one reference copy and two lendable ones.
+- Loans reference a copy instead of an ISBN. Lending by ISBN picks any available lendable copy; staff can also lend or return a specific copy.
+- Search returns titles with the number of available copies instead of a single lent flag.
+- The data file gets format version 2; version 1 files are migrated to one copy per title on load.
 
 ## Structure
 
