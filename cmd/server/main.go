@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"buecherei/internal/api"
+	"buecherei/internal/auth"
 	"buecherei/internal/library"
 	"buecherei/internal/storage"
 	"buecherei/internal/web"
@@ -19,18 +20,28 @@ import (
 func main() {
 	addr := flag.String("addr", ":8080", "listen address")
 	dataPath := flag.String("data", "buecherei.json", "path of the JSON data file")
+	tokensPath := flag.String("tokens", "tokens.json", "path of the JSON token file")
 	flag.Parse()
+
+	tokens, err := auth.Load(*tokensPath)
+	if errors.Is(err, os.ErrNotExist) {
+		log.Fatalf("token file %s not found; for a demo run: cp tokens.example.json %s", *tokensPath, *tokensPath)
+	}
+	if err != nil {
+		log.Fatalf("load tokens: %v", err)
+	}
 
 	lib, err := load(storage.NewFileStore(*dataPath))
 	if err != nil {
 		log.Fatalf("load %s: %v", *dataPath, err)
 	}
 
-	apiHandler := api.NewHandler(lib)
+	apiHandler := api.NewHandler(lib, tokens)
 	mux := http.NewServeMux()
 	mux.Handle("/books", apiHandler)
 	mux.Handle("/books/", apiHandler)
 	mux.Handle("/shelves", apiHandler)
+	mux.Handle("/me", apiHandler)
 	mux.Handle("GET /{$}", web.Handler())
 
 	srv := &http.Server{

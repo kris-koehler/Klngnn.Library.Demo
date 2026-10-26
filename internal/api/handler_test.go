@@ -8,12 +8,18 @@ import (
 	"strings"
 	"testing"
 
+	"buecherei/internal/auth"
 	"buecherei/internal/library"
 )
 
 const (
 	isbnHobbit    = "978-3-608-93800-4"
 	isbnCleanCode = "978-0-13-235088-4"
+
+	tokenMax   = "token-customer-max"
+	tokenErika = "token-customer-erika"
+	tokenStaff = "token-staff-theke"
+	noToken    = ""
 )
 
 func newTestHandler(t *testing.T) http.Handler {
@@ -46,14 +52,26 @@ func newTestHandler(t *testing.T) http.Handler {
 			t.Fatalf("AddBook() error = %v", err)
 		}
 	}
-	return NewHandler(lib)
+
+	tokens, err := auth.New([]auth.Entry{
+		{Token: tokenMax, Name: "Max", Role: auth.RoleCustomer},
+		{Token: tokenErika, Name: "Erika", Role: auth.RoleCustomer},
+		{Token: tokenStaff, Name: "Theke", Role: auth.RoleStaff},
+	})
+	if err != nil {
+		t.Fatalf("auth.New() error = %v", err)
+	}
+	return NewHandler(lib, tokens)
 }
 
-func do(t *testing.T, h http.Handler, method, path, body string) *httptest.ResponseRecorder {
+func do(t *testing.T, h http.Handler, method, path, token, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	if body != "" {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -63,7 +81,7 @@ func do(t *testing.T, h http.Handler, method, path, body string) *httptest.Respo
 func TestSearchBooks(t *testing.T) {
 	h := newTestHandler(t)
 
-	rec := do(t, h, http.MethodGet, "/books?q=hobbit", "")
+	rec := do(t, h, http.MethodGet, "/books?q=hobbit", noToken, "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
@@ -82,12 +100,58 @@ func TestSearchBooks(t *testing.T) {
 func TestSearchBooksNoMatch(t *testing.T) {
 	h := newTestHandler(t)
 
-	rec := do(t, h, http.MethodGet, "/books?q=xyz", "")
+	rec := do(t, h, http.MethodGet, "/books?q=xyz", noToken, "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
 	if got := strings.TrimSpace(rec.Body.String()); got != "[]" {
 		t.Errorf("body = %q, want []", got)
+	}
+}
+
+func TestAccessControl(t *testing.T) {
+	loanPath := "/books/" + isbnHobbit + "/loan"
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		token  string
+		body   string
+		want   int
+	}{
+		{"me without token", http.MethodGet, "/me", noToken, "", http.StatusUnauthorized},
+		{"me with unknown token", http.MethodGet, "/me", "unknown-token", "", http.StatusUnauthorized},
+		{"lend without token", http.MethodPost, loanPath, noToken, `{"borrower":"Max"}`, http.StatusUnauthorized},
+		{"return as customer", http.MethodDelete, loanPath, tokenMax, "", http.StatusForbidden},
+		{"add book as customer", http.MethodPost, "/books", tokenMax, `{}`, http.StatusForbidden},
+		{"shelves as customer", http.MethodGet, "/shelves", tokenMax, "", http.StatusForbidden},
+		{"shelves without token", http.MethodGet, "/shelves", noToken, "", http.StatusUnauthorized},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newTestHandler(t)
+
+			rec := do(t, h, tt.method, tt.path, tt.token, tt.body)
+			if rec.Code != tt.want {
+				t.Fatalf("status = %d, want %d (body %s)", rec.Code, tt.want, rec.Body)
+			}
+			if tt.want == http.StatusUnauthorized && rec.Header().Get("WWW-Authenticate") != "Bearer" {
+				t.Errorf("WWW-Authenticate = %q, want Bearer", rec.Header().Get("WWW-Authenticate"))
+			}
+		})
+	}
+}
+
+func TestMe(t *testing.T) {
+	h := newTestHandler(t)
+
+	rec := do(t, h, http.MethodGet, "/me", tokenStaff, "")
+	var me meResponse
+	if err := json.NewDecoder(rec.Body).Decode(&me); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if me != (meResponse{Name: "Theke", Role: "staff"}) {
+		t.Errorf("me = %+v", me)
 	}
 }
 
@@ -97,16 +161,17 @@ func TestLendAndReturn(t *testing.T) {
 	steps := []struct {
 		name   string
 		method string
+		token  string
 		body   string
 		want   int
 	}{
-		{"lend", http.MethodPost, `{"borrower":"Max"}`, http.StatusCreated},
-		{"lend again", http.MethodPost, `{"borrower":"Max"}`, http.StatusConflict},
-		{"return", http.MethodDelete, "", http.StatusNoContent},
-		{"return again", http.MethodDelete, "", http.StatusConflict},
+		{"lend", http.MethodPost, tokenStaff, `{"borrower":"Max"}`, http.StatusCreated},
+		{"lend again", http.MethodPost, tokenStaff, `{"borrower":"Max"}`, http.StatusConflict},
+		{"return", http.MethodDelete, tokenStaff, "", http.StatusNoContent},
+		{"return again", http.MethodDelete, tokenStaff, "", http.StatusConflict},
 	}
 	for _, s := range steps {
-		rec := do(t, h, s.method, loanPath, s.body)
+		rec := do(t, h, s.method, loanPath, s.token, s.body)
 		if rec.Code != s.want {
 			t.Fatalf("%s: status = %d, want %d (body %s)", s.name, rec.Code, s.want, rec.Body)
 		}
@@ -116,15 +181,51 @@ func TestLendAndReturn(t *testing.T) {
 	}
 }
 
+func TestLendAsCustomer(t *testing.T) {
+	loanPath := "/books/" + isbnHobbit + "/loan"
+	tests := []struct {
+		name         string
+		body         string
+		want         int
+		wantBorrower string
+	}{
+		{"without body", "", http.StatusCreated, "Max"},
+		{"empty object", `{}`, http.StatusCreated, "Max"},
+		{"own name", `{"borrower":"Max"}`, http.StatusCreated, "Max"},
+		{"someone else", `{"borrower":"Erika"}`, http.StatusForbidden, ""},
+		{"malformed json", `{`, http.StatusBadRequest, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newTestHandler(t)
+
+			rec := do(t, h, http.MethodPost, loanPath, tokenMax, tt.body)
+			if rec.Code != tt.want {
+				t.Fatalf("status = %d, want %d (body %s)", rec.Code, tt.want, rec.Body)
+			}
+			if tt.wantBorrower == "" {
+				return
+			}
+			var loan loanResponse
+			if err := json.NewDecoder(rec.Body).Decode(&loan); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if loan.Borrower != tt.wantBorrower {
+				t.Errorf("borrower = %q, want %q", loan.Borrower, tt.wantBorrower)
+			}
+		})
+	}
+}
+
 func TestLendResponse(t *testing.T) {
 	h := newTestHandler(t)
 
-	rec := do(t, h, http.MethodPost, "/books/"+isbnHobbit+"/loan", `{"borrower":"Max"}`)
+	rec := do(t, h, http.MethodPost, "/books/"+isbnHobbit+"/loan", tokenStaff, `{"borrower":"Erika"}`)
 	var loan loanResponse
 	if err := json.NewDecoder(rec.Body).Decode(&loan); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if loan != (loanResponse{ISBN: "9783608938004", Borrower: "Max"}) {
+	if loan != (loanResponse{ISBN: "9783608938004", Borrower: "Erika"}) {
 		t.Errorf("loan = %+v", loan)
 	}
 }
@@ -132,7 +233,7 @@ func TestLendResponse(t *testing.T) {
 func TestAddBook(t *testing.T) {
 	h := newTestHandler(t)
 
-	rec := do(t, h, http.MethodPost, "/books",
+	rec := do(t, h, http.MethodPost, "/books", tokenStaff,
 		`{"title":"Momo","author":"Michael Ende","isbn":"978-3-522-20210-1","year":1973}`)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want %d (body %s)", rec.Code, http.StatusCreated, rec.Body)
@@ -146,7 +247,7 @@ func TestAddBook(t *testing.T) {
 		t.Errorf("book = %+v, want %+v", b, want)
 	}
 
-	rec = do(t, h, http.MethodGet, "/books?q=momo", "")
+	rec = do(t, h, http.MethodGet, "/books?q=momo", noToken, "")
 	if !strings.Contains(rec.Body.String(), "Momo") {
 		t.Errorf("search after add: body = %s", rec.Body)
 	}
@@ -158,6 +259,7 @@ func TestAddBookErrors(t *testing.T) {
 		body string
 		want int
 	}{
+		{"empty body", ``, http.StatusBadRequest},
 		{"malformed json", `{`, http.StatusBadRequest},
 		{"invalid isbn", `{"title":"X","author":"Y","isbn":"abc","year":2000}`, http.StatusBadRequest},
 		{"empty title", `{"title":"","author":"Y","isbn":"9780000000000","year":2000}`, http.StatusBadRequest},
@@ -167,7 +269,7 @@ func TestAddBookErrors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			h := newTestHandler(t)
 
-			rec := do(t, h, http.MethodPost, "/books", tt.body)
+			rec := do(t, h, http.MethodPost, "/books", tokenStaff, tt.body)
 			if rec.Code != tt.want {
 				t.Fatalf("status = %d, want %d (body %s)", rec.Code, tt.want, rec.Body)
 			}
@@ -181,7 +283,7 @@ func TestAddBookNoSpace(t *testing.T) {
 	// Shelves A and B hold 2 books each; the test library starts with 2.
 	for i, want := range []int{http.StatusCreated, http.StatusCreated, http.StatusConflict} {
 		body := fmt.Sprintf(`{"title":"Buch %d","author":"Y","isbn":"978000000000%d","year":2000}`, i, i)
-		if rec := do(t, h, http.MethodPost, "/books", body); rec.Code != want {
+		if rec := do(t, h, http.MethodPost, "/books", tokenStaff, body); rec.Code != want {
 			t.Fatalf("book %d: status = %d, want %d (body %s)", i, rec.Code, want, rec.Body)
 		}
 	}
@@ -190,7 +292,7 @@ func TestAddBookNoSpace(t *testing.T) {
 func TestListShelves(t *testing.T) {
 	h := newTestHandler(t)
 
-	rec := do(t, h, http.MethodGet, "/shelves", "")
+	rec := do(t, h, http.MethodGet, "/shelves", tokenStaff, "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
@@ -216,12 +318,13 @@ func TestLendErrors(t *testing.T) {
 		{"invalid isbn", "/books/abc/loan", `{"borrower":"Max"}`, http.StatusBadRequest},
 		{"malformed json", "/books/" + isbnHobbit + "/loan", `{`, http.StatusBadRequest},
 		{"empty borrower", "/books/" + isbnHobbit + "/loan", `{"borrower":""}`, http.StatusBadRequest},
+		{"staff without body", "/books/" + isbnHobbit + "/loan", ``, http.StatusBadRequest},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h := newTestHandler(t)
 
-			rec := do(t, h, http.MethodPost, tt.path, tt.body)
+			rec := do(t, h, http.MethodPost, tt.path, tokenStaff, tt.body)
 			if rec.Code != tt.want {
 				t.Fatalf("status = %d, want %d (body %s)", rec.Code, tt.want, rec.Body)
 			}
