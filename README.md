@@ -1,5 +1,5 @@
 # Library (Demo)
-#### do not even tink about, to use in production yet!
+#### Do not even think about using this in production yet!
 
 ## English
 
