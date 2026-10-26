@@ -25,6 +25,7 @@ type Library struct {
 	mu      sync.RWMutex
 	shelves []*Shelf
 	loans   map[ISBN]Loan
+	persist func(Snapshot) error
 }
 
 // New creates an empty library without shelves.
@@ -49,7 +50,7 @@ func (l *Library) AddShelf(id string, capacity int) error {
 		}
 	}
 	l.shelves = append(l.shelves, s)
-	return nil
+	return l.save(func() { l.shelves = l.shelves[:len(l.shelves)-1] })
 }
 
 // AddBook places the book on the first shelf with free space and returns
@@ -64,6 +65,9 @@ func (l *Library) AddBook(b Book) (shelfID string, err error) {
 	for _, s := range l.shelves {
 		if s.HasSpace() {
 			if err := s.Add(b); err != nil {
+				return "", err
+			}
+			if err := l.save(func() { s.books = s.books[:len(s.books)-1] }); err != nil {
 				return "", err
 			}
 			return s.ID(), nil
@@ -131,6 +135,9 @@ func (l *Library) Lend(isbn ISBN, borrower string) (Loan, error) {
 
 	loan := Loan{ISBN: isbn, Borrower: borrower}
 	l.loans[isbn] = loan
+	if err := l.save(func() { delete(l.loans, isbn) }); err != nil {
+		return Loan{}, err
+	}
 	return loan, nil
 }
 
@@ -143,11 +150,12 @@ func (l *Library) Return(isbn ISBN) error {
 	if _, _, ok := l.locate(isbn); !ok {
 		return fmt.Errorf("%w: %s", ErrBookNotFound, isbn)
 	}
-	if _, lent := l.loans[isbn]; !lent {
+	loan, lent := l.loans[isbn]
+	if !lent {
 		return fmt.Errorf("%w: %s", ErrNotLent, isbn)
 	}
 	delete(l.loans, isbn)
-	return nil
+	return l.save(func() { l.loans[isbn] = loan })
 }
 
 // locate expects l.mu to be held.
