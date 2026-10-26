@@ -16,9 +16,11 @@
     }
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, sans-serif; }
   main { max-width: 960px; margin: 0 auto; padding: 24px 16px 48px; }
-  h1 { margin: 0 0 16px; font-size: 1.6rem; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  h1 { margin: 0; font-size: 1.6rem; }
   h2 { margin: 0 0 12px; font-size: 1.1rem; }
   section { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
   input, button { font: inherit; color: inherit; }
@@ -27,6 +29,9 @@
   button { background: var(--accent); color: var(--surface); border: 0; border-radius: 6px; padding: 6px 12px; cursor: pointer; white-space: nowrap; }
   button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
   #search { width: 100%; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  #login input { width: 16rem; }
+  #user { color: var(--muted); }
   .table-wrap { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; }
   th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border); vertical-align: middle; }
@@ -35,16 +40,32 @@
   .status-ok { color: var(--ok); } .status-lent { color: var(--warn); } .status-ref { color: var(--muted); }
   .lend { display: flex; gap: 6px; }
   .lend input { width: 9rem; }
-  .empty { color: var(--muted); padding: 12px 0; }
+  .empty, .hint { color: var(--muted); }
+  .empty { padding: 12px 0; }
   form.add { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; align-items: center; }
   form.add label.check { display: flex; gap: 6px; align-items: center; }
+  .shelves { display: flex; flex-wrap: wrap; gap: 12px; }
+  .shelf { border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; min-width: 120px; }
+  .shelf strong { display: block; }
+  .bar { height: 6px; background: var(--border); border-radius: 3px; margin-top: 6px; overflow: hidden; }
+  .bar span { display: block; height: 100%; background: var(--accent); }
   #message { min-height: 1.5em; margin: 0 0 12px; }
   #message.error { color: var(--error); } #message.ok { color: var(--ok); }
 </style>
 </head>
 <body>
 <main>
-  <h1>Bücherei</h1>
+  <header>
+    <h1>Bücherei</h1>
+    <form id="login" class="row">
+      <input id="token" type="password" placeholder="Zugangs-Token" aria-label="Zugangs-Token" autocomplete="off">
+      <button type="submit">Anmelden</button>
+    </form>
+    <div id="session" class="row" hidden>
+      <span id="user"></span>
+      <button type="button" class="secondary" id="logout">Abmelden</button>
+    </div>
+  </header>
   <p id="message" role="status"></p>
 
   <section>
@@ -54,6 +75,7 @@
 
   <section>
     <h2>Bestand</h2>
+    <p id="login-hint" class="hint">Zum Ausleihen bitte anmelden.</p>
     <div class="table-wrap">
       <table>
         <thead><tr><th>Titel</th><th>Autor</th><th>ISBN</th><th>Jahr</th><th>Regal</th><th>Status</th><th></th></tr></thead>
@@ -63,7 +85,12 @@
     <p id="empty" class="empty" hidden>Keine Bücher gefunden.</p>
   </section>
 
-  <section>
+  <section class="staff-only" hidden>
+    <h2>Regale</h2>
+    <div id="shelves" class="shelves"></div>
+  </section>
+
+  <section class="staff-only" hidden>
     <h2>Buch hinzufügen</h2>
     <form class="add" id="add-form">
       <input name="title" placeholder="Titel" required aria-label="Titel">
@@ -78,6 +105,20 @@
 
 <script>
 const $ = (sel) => document.querySelector(sel);
+const ROLE_LABELS = { customer: "Kunde", staff: "Personal" };
+
+// The token is kept per browser tab only; storage may be unavailable.
+let token = "";
+let me = null;
+try { token = sessionStorage.getItem("token") || ""; } catch (e) {}
+
+function rememberToken(value) {
+  token = value;
+  try {
+    if (value) sessionStorage.setItem("token", value);
+    else sessionStorage.removeItem("token");
+  } catch (e) {}
+}
 
 function showMessage(text, kind) {
   const el = $("#message");
@@ -86,16 +127,21 @@ function showMessage(text, kind) {
 }
 
 async function api(method, path, body) {
-  const res = await fetch(path, {
-    method,
-    headers: body ? { "Content-Type": "application/json" } : {},
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  const headers = {};
+  if (body) headers["Content-Type"] = "application/json";
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const res = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : undefined });
   if (res.status === 204) return null;
   const data = await res.json().catch(() => null);
-  if (!res.ok) throw new Error((data && data.error) || `HTTP ${res.status}`);
+  if (!res.ok) {
+    const err = new Error((data && data.error) || `HTTP ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
   return data;
 }
+
+function isStaff() { return me && me.role === "staff"; }
 
 function cell(text, className) {
   const td = document.createElement("td");
@@ -115,21 +161,31 @@ function button(label, onClick, secondary) {
 
 function actionCell(book) {
   const td = document.createElement("td");
-  if (book.referenceOnly) return td;
+  if (!me || book.referenceOnly) return td;
+  const loanPath = `/books/${book.isbn}/loan`;
+
   if (book.lent) {
-    td.append(button("Zurückgeben", () => run(
-      () => api("DELETE", `/books/${book.isbn}/loan`),
-      `„${book.title}“ zurückgegeben.`), true));
+    if (isStaff()) {
+      td.append(button("Zurückgeben", () => run(
+        () => api("DELETE", loanPath), `„${book.title}“ zurückgegeben.`), true));
+    }
     return td;
   }
+
+  if (!isStaff()) {
+    td.append(button("Ausleihen", () => run(
+      () => api("POST", loanPath), `„${book.title}“ ausgeliehen.`)));
+    return td;
+  }
+
   const wrap = document.createElement("div");
   wrap.className = "lend";
   const name = document.createElement("input");
   name.placeholder = "Name";
   name.setAttribute("aria-label", `Name für „${book.title}“`);
   const lend = () => run(
-    () => api("POST", `/books/${book.isbn}/loan`, { borrower: name.value }),
-    `„${book.title}“ ausgeliehen.`);
+    () => api("POST", loanPath, { borrower: name.value }),
+    `„${book.title}“ an ${name.value.trim()} ausgeliehen.`);
   name.addEventListener("keydown", (e) => { if (e.key === "Enter") lend(); });
   wrap.append(name, button("Ausleihen", lend));
   td.append(wrap);
@@ -141,18 +197,42 @@ function statusCell(book) {
   return book.lent ? cell("ausgeliehen", "status-lent") : cell("verfügbar", "status-ok");
 }
 
-async function load() {
+async function loadBooks() {
   const q = $("#search").value;
+  const books = await api("GET", `/books?q=${encodeURIComponent(q)}`);
+  const rows = books.map((b) => {
+    const tr = document.createElement("tr");
+    tr.append(cell(b.title), cell(b.author), cell(b.isbn, "isbn"), cell(b.year),
+      cell(b.shelf), statusCell(b), actionCell(b));
+    return tr;
+  });
+  $("#books").replaceChildren(...rows);
+  $("#empty").hidden = books.length > 0;
+}
+
+async function loadShelves() {
+  if (!isStaff()) return;
+  const shelves = await api("GET", "/shelves");
+  $("#shelves").replaceChildren(...shelves.map((s) => {
+    const div = document.createElement("div");
+    div.className = "shelf";
+    const title = document.createElement("strong");
+    title.textContent = `Regal ${s.id}`;
+    const text = document.createElement("span");
+    text.textContent = `${s.used} von ${s.capacity} belegt`;
+    const bar = document.createElement("div");
+    bar.className = "bar";
+    const fill = document.createElement("span");
+    fill.style.width = `${(s.used / s.capacity) * 100}%`;
+    bar.append(fill);
+    div.append(title, text, bar);
+    return div;
+  }));
+}
+
+async function load() {
   try {
-    const books = await api("GET", `/books?q=${encodeURIComponent(q)}`);
-    const rows = books.map((b) => {
-      const tr = document.createElement("tr");
-      tr.append(cell(b.title), cell(b.author), cell(b.isbn, "isbn"), cell(b.year),
-        cell(b.shelf), statusCell(b), actionCell(b));
-      return tr;
-    });
-    $("#books").replaceChildren(...rows);
-    $("#empty").hidden = books.length > 0;
+    await Promise.all([loadBooks(), loadShelves()]);
   } catch (err) {
     showMessage(err.message, "error");
   }
@@ -168,10 +248,49 @@ async function run(action, successText) {
   await load();
 }
 
+function renderSession() {
+  $("#login").hidden = !!me;
+  $("#session").hidden = !me;
+  $("#login-hint").hidden = !!me;
+  $("#user").textContent = me ? `${me.name} (${ROLE_LABELS[me.role] || me.role})` : "";
+  document.querySelectorAll(".staff-only").forEach((el) => { el.hidden = !isStaff(); });
+}
+
+async function restoreSession() {
+  if (!token) return;
+  try {
+    me = await api("GET", "/me");
+  } catch (err) {
+    rememberToken("");
+    me = null;
+    if (err.status === 401) showMessage("Anmeldung abgelaufen oder Token ungültig.", "error");
+  }
+}
+
+$("#login").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  showMessage("");
+  rememberToken($("#token").value.trim());
+  $("#token").value = "";
+  await restoreSession();
+  if (me) showMessage(`Angemeldet als ${me.name}.`, "ok");
+  else if (!$("#message").textContent) showMessage("Token ungültig.", "error");
+  renderSession();
+  await load();
+});
+
+$("#logout").addEventListener("click", async () => {
+  rememberToken("");
+  me = null;
+  showMessage("Abgemeldet.", "ok");
+  renderSession();
+  await load();
+});
+
 let timer;
 $("#search").addEventListener("input", () => {
   clearTimeout(timer);
-  timer = setTimeout(load, 200);
+  timer = setTimeout(loadBooks, 200);
 });
 
 $("#add-form").addEventListener("submit", (e) => {
@@ -179,7 +298,7 @@ $("#add-form").addEventListener("submit", (e) => {
   const form = e.target;
   const f = new FormData(form);
   run(async () => {
-    const book = await api("POST", "/books", {
+    await api("POST", "/books", {
       title: f.get("title"),
       author: f.get("author"),
       isbn: f.get("isbn"),
@@ -187,11 +306,14 @@ $("#add-form").addEventListener("submit", (e) => {
       referenceOnly: f.get("referenceOnly") === "on",
     });
     form.reset();
-    return book;
   }, `„${f.get("title")}“ hinzugefügt.`);
 });
 
-load();
+(async () => {
+  await restoreSession();
+  renderSession();
+  await load();
+})();
 </script>
 </body>
 </html>
