@@ -17,7 +17,7 @@ ISBNs are only validated for format because two of the three sample ISBNs have a
 
 New books go to the chosen shelf or, if none is given, to the first one with free space; the shelf view shows how many of the books on each shelf are currently lent.
 
-Next up are shelf management and multiple copies per ISBN (see roadmap), followed by check-digit validation, member management with due dates and real sign-in (passwords or SSO, sessions instead of static tokens), HTTPS, a database instead of the JSON file and further endpoints (single lookup, own loans).
+Next up are a role hierarchy with an `admin` role, shelf management, multiple copies per ISBN and real sign-in with accounts, sessions and HTTPS (see roadmap), followed by check-digit validation, member management with due dates, a database instead of the JSON file and further endpoints (single lookup, own loans).
 
 ## Deutsch
 
@@ -35,7 +35,7 @@ Die ISBN wird nur auf ihr Format geprüft, weil zwei der drei Beispiel-ISBNs ein
 
 Neue Bücher landen im gewählten Regal oder, ohne Angabe, im ersten mit freiem Platz; die Regalansicht zeigt neben der Belegung, wie viele der Bücher gerade ausgeliehen sind.
 
-Als Nächstes stehen Regalverwaltung und mehrere Exemplare pro ISBN an (siehe Roadmap), danach Prüfziffer-Validierung, Personenverwaltung mit Leihfristen und echter Anmeldung (Passwörter oder SSO, Sessions statt statischer Tokens), HTTPS, eine Datenbank statt der JSON-Datei und weitere Endpunkte (Einzelabruf, eigene Ausleihen).
+Als Nächstes stehen eine Rollenhierarchie mit einer `admin`-Rolle, Regalverwaltung, mehrere Exemplare pro ISBN und eine echte Anmeldung mit Konten, Sessions und HTTPS an (siehe Roadmap), danach Prüfziffer-Validierung, Personenverwaltung mit Leihfristen, eine Datenbank statt der JSON-Datei und weitere Endpunkte (Einzelabruf, eigene Ausleihen).
 
 ## Server
 
@@ -85,7 +85,19 @@ curl -si -X POST -H "$PERSONAL" -H 'Content-Type: application/json' \
 
 ## Roadmap
 
-### Shelf management (staff)
+### Role hierarchy
+
+Today there are two roles: `customer` (self-service) and `staff` (front desk). A third, higher role `admin` is planned for managing the library itself. Roles become hierarchical, so each role includes the rights of the one below it:
+
+| Role | Rights |
+|---|---|
+| `customer` | search, borrow for themselves, see own loans |
+| `staff` | everything of `customer`, plus lending for anyone, returns, adding books, shelf view |
+| `admin` | everything of `staff`, plus shelf management and (with accounts) managing users and roles |
+
+Routes then declare a minimum role (`require(auth.RoleStaff, …)`) instead of a list of allowed roles, so a new role does not require touching every route. The role is introduced together with the first admin-only feature, shelf management; before that it would be identical to `staff`.
+
+### Shelf management (admin)
 
 Today shelves can only be created in code (`cmd/server/seed.go`).
 
@@ -111,6 +123,17 @@ Today one ISBN is exactly one physical book.
 - Loans reference a copy instead of an ISBN. Lending by ISBN picks any available lendable copy; staff can also lend or return a specific copy.
 - Search returns titles with the number of available copies instead of a single lent flag.
 - The data file gets format version 2; version 1 files are migrated to one copy per title on load.
+
+### Authentication with accounts and sessions
+
+Today static bearer tokens from `tokens.json` are the only credentials: no accounts, no passwords, no expiry, and anyone holding a token is that user until the file is changed. The token comparison is already hashed and constant-time; the rest should become:
+
+- **Accounts:** members and employees stored with name, role and password hash (Argon2id via `golang.org/x/crypto`, which would be the first external dependency, or PBKDF2 from the standard library's `crypto/pbkdf2`). Never store or log plain passwords.
+- **Login and sessions:** `POST /login` checks the password and issues a random session ID (32 bytes from `crypto/rand`); the server stores only its hash with user, expiry and last activity. `POST /logout` deletes it. Sessions expire after an absolute lifetime and after inactivity.
+- **Cookies:** the browser gets the session as a cookie with `HttpOnly`, `Secure` and `SameSite=Strict`, so scripts cannot read it. Because cookies are sent automatically, write requests additionally need CSRF protection (checking the `Origin` header or a CSRF token). API clients can keep using bearer tokens.
+- **Brute-force protection:** rate limiting and a temporary lockout after repeated failed logins, with the same error message for unknown users and wrong passwords.
+- **Transport:** HTTPS only (TLS directly in the server or via a reverse proxy) plus HSTS; without it, passwords and sessions travel in clear text.
+- **Later:** single sign-on (OIDC) for employees, password reset, and an audit log of who lent, returned or changed what.
 
 ## Structure
 
