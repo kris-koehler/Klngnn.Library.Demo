@@ -2,6 +2,7 @@ package library
 
 import (
 	"errors"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -223,6 +224,22 @@ func TestLendConcurrent(t *testing.T) {
 	}
 	if got := alreadyLent.Load(); got != n-1 {
 		t.Errorf("ErrAlreadyLent = %d, want %d", got, n-1)
+	}
+}
+
+func TestShelves(t *testing.T) {
+	if got := New().Shelves(); got == nil || len(got) != 0 {
+		t.Errorf("Shelves() on empty library = %#v, want empty non-nil slice", got)
+	}
+
+	lib := newTestLibrary(t)
+	if _, err := lib.Lend(isbnHobbit, "Max"); err != nil {
+		t.Fatalf("Lend() error = %v", err)
+	}
+
+	want := []ShelfInfo{{ID: "A", Capacity: 2, Used: 2}, {ID: "B", Capacity: 2, Used: 1}}
+	if got := lib.Shelves(); !reflect.DeepEqual(got, want) {
+		t.Errorf("Shelves() = %+v, want %+v", got, want)
 	}
 }
 

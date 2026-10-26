@@ -30,6 +30,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/books", apiHandler)
 	mux.Handle("/books/", apiHandler)
+	mux.Handle("/shelves", apiHandler)
 	mux.Handle("GET /{$}", web.Handler())
 
 	srv := &http.Server{

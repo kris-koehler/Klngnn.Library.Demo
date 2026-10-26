@@ -187,6 +187,23 @@ func TestAddBookNoSpace(t *testing.T) {
 	}
 }
 
+func TestListShelves(t *testing.T) {
+	h := newTestHandler(t)
+
+	rec := do(t, h, http.MethodGet, "/shelves", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var shelves []shelfResponse
+	if err := json.NewDecoder(rec.Body).Decode(&shelves); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	want := []shelfResponse{{ID: "A", Capacity: 2, Used: 2, Free: 0}, {ID: "B", Capacity: 2, Used: 0, Free: 2}}
+	if len(shelves) != len(want) || shelves[0] != want[0] || shelves[1] != want[1] {
+		t.Errorf("shelves = %+v, want %+v", shelves, want)
+	}
+}
+
 func TestLendErrors(t *testing.T) {
 	tests := []struct {
 		name string

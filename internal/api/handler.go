@@ -40,6 +40,13 @@ type loanResponse struct {
 	Borrower string `json:"borrower"`
 }
 
+type shelfResponse struct {
+	ID       string `json:"id"`
+	Capacity int    `json:"capacity"`
+	Used     int    `json:"used"`
+	Free     int    `json:"free"`
+}
+
 type errorResponse struct {
 	Error string `json:"error"`
 }
@@ -56,7 +63,18 @@ func NewHandler(lib *library.Library) http.Handler {
 	mux.HandleFunc("POST /books", h.addBook)
 	mux.HandleFunc("POST /books/{isbn}/loan", h.lendBook)
 	mux.HandleFunc("DELETE /books/{isbn}/loan", h.returnBook)
+	mux.HandleFunc("GET /shelves", h.listShelves)
 	return mux
+}
+
+func (h *handler) listShelves(w http.ResponseWriter, r *http.Request) {
+	infos := h.lib.Shelves()
+
+	shelves := make([]shelfResponse, 0, len(infos))
+	for _, s := range infos {
+		shelves = append(shelves, shelfResponse{ID: s.ID, Capacity: s.Capacity, Used: s.Used, Free: s.Capacity - s.Used})
+	}
+	writeJSON(w, http.StatusOK, shelves)
 }
 
 func (h *handler) searchBooks(w http.ResponseWriter, r *http.Request) {
