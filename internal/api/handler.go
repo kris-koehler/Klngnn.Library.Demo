@@ -23,6 +23,14 @@ type bookResponse struct {
 	Lent          bool   `json:"lent"`
 }
 
+type bookRequest struct {
+	Title         string `json:"title"`
+	Author        string `json:"author"`
+	ISBN          string `json:"isbn"`
+	Year          int    `json:"year"`
+	ReferenceOnly bool   `json:"referenceOnly"`
+}
+
 type loanRequest struct {
 	Borrower string `json:"borrower"`
 }
@@ -45,6 +53,7 @@ func NewHandler(lib *library.Library) http.Handler {
 	h := &handler{lib: lib}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /books", h.searchBooks)
+	mux.HandleFunc("POST /books", h.addBook)
 	mux.HandleFunc("POST /books/{isbn}/loan", h.lendBook)
 	mux.HandleFunc("DELETE /books/{isbn}/loan", h.returnBook)
 	return mux
@@ -55,17 +64,39 @@ func (h *handler) searchBooks(w http.ResponseWriter, r *http.Request) {
 
 	books := make([]bookResponse, 0, len(results))
 	for _, res := range results {
-		books = append(books, bookResponse{
-			Title:         res.Book.Title,
-			Author:        res.Book.Author,
-			ISBN:          string(res.Book.ISBN),
-			Year:          res.Book.Year,
-			ReferenceOnly: res.Book.ReferenceOnly,
-			Shelf:         res.ShelfID,
-			Lent:          res.Lent,
-		})
+		books = append(books, toBookResponse(res.Book, res.ShelfID, res.Lent))
 	}
 	writeJSON(w, http.StatusOK, books)
+}
+
+func (h *handler) addBook(w http.ResponseWriter, r *http.Request) {
+	var req bookRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, err)
+		return
+	}
+	isbn, err := library.ParseISBN(req.ISBN)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	newBook := library.NewBook
+	if req.ReferenceOnly {
+		newBook = library.NewReferenceBook
+	}
+	b, err := newBook(req.Title, req.Author, isbn, req.Year)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	shelfID, err := h.lib.AddBook(b)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, toBookResponse(b, shelfID, false))
 }
 
 func (h *handler) lendBook(w http.ResponseWriter, r *http.Request) {
@@ -75,10 +106,9 @@ func (h *handler) lendBook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var req loanRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, fmt.Errorf("%w: malformed JSON body", library.ErrInvalidInput))
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, err)
 		return
 	}
 
@@ -102,6 +132,27 @@ func (h *handler) returnBook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func toBookResponse(b library.Book, shelfID string, lent bool) bookResponse {
+	return bookResponse{
+		Title:         b.Title,
+		Author:        b.Author,
+		ISBN:          string(b.ISBN),
+		Year:          b.Year,
+		ReferenceOnly: b.ReferenceOnly,
+		Shelf:         shelfID,
+		Lent:          lent,
+	}
+}
+
+// decodeJSON reads a size-limited JSON body into v.
+func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+		return fmt.Errorf("%w: malformed JSON body", library.ErrInvalidInput)
+	}
+	return nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {

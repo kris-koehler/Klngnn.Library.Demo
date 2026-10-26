@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,8 +19,10 @@ const (
 func newTestHandler(t *testing.T) http.Handler {
 	t.Helper()
 	lib := library.New()
-	if err := lib.AddShelf("A", 2); err != nil {
-		t.Fatalf("AddShelf() error = %v", err)
+	for _, id := range []string{"A", "B"} {
+		if err := lib.AddShelf(id, 2); err != nil {
+			t.Fatalf("AddShelf(%q) error = %v", id, err)
+		}
 	}
 
 	hobbitISBN, err := library.ParseISBN(isbnHobbit)
@@ -123,6 +126,64 @@ func TestLendResponse(t *testing.T) {
 	}
 	if loan != (loanResponse{ISBN: "9783608938004", Borrower: "Max"}) {
 		t.Errorf("loan = %+v", loan)
+	}
+}
+
+func TestAddBook(t *testing.T) {
+	h := newTestHandler(t)
+
+	rec := do(t, h, http.MethodPost, "/books",
+		`{"title":"Momo","author":"Michael Ende","isbn":"978-3-522-20210-1","year":1973}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d (body %s)", rec.Code, http.StatusCreated, rec.Body)
+	}
+	var b bookResponse
+	if err := json.NewDecoder(rec.Body).Decode(&b); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	want := bookResponse{Title: "Momo", Author: "Michael Ende", ISBN: "9783522202101", Year: 1973, Shelf: "B"}
+	if b != want {
+		t.Errorf("book = %+v, want %+v", b, want)
+	}
+
+	rec = do(t, h, http.MethodGet, "/books?q=momo", "")
+	if !strings.Contains(rec.Body.String(), "Momo") {
+		t.Errorf("search after add: body = %s", rec.Body)
+	}
+}
+
+func TestAddBookErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want int
+	}{
+		{"malformed json", `{`, http.StatusBadRequest},
+		{"invalid isbn", `{"title":"X","author":"Y","isbn":"abc","year":2000}`, http.StatusBadRequest},
+		{"empty title", `{"title":"","author":"Y","isbn":"9780000000000","year":2000}`, http.StatusBadRequest},
+		{"duplicate isbn", `{"title":"X","author":"Y","isbn":"` + isbnHobbit + `","year":2000}`, http.StatusConflict},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newTestHandler(t)
+
+			rec := do(t, h, http.MethodPost, "/books", tt.body)
+			if rec.Code != tt.want {
+				t.Fatalf("status = %d, want %d (body %s)", rec.Code, tt.want, rec.Body)
+			}
+		})
+	}
+}
+
+func TestAddBookNoSpace(t *testing.T) {
+	h := newTestHandler(t)
+
+	// Shelves A and B hold 2 books each; the test library starts with 2.
+	for i, want := range []int{http.StatusCreated, http.StatusCreated, http.StatusConflict} {
+		body := fmt.Sprintf(`{"title":"Buch %d","author":"Y","isbn":"978000000000%d","year":2000}`, i, i)
+		if rec := do(t, h, http.MethodPost, "/books", body); rec.Code != want {
+			t.Fatalf("book %d: status = %d, want %d (body %s)", i, rec.Code, want, rec.Body)
+		}
 	}
 }
 
